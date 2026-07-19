@@ -1,0 +1,6 @@
+.streamlit/
+rag_db/
+rag documents/
+*.env
+__pycache__/
+.DS_Store
