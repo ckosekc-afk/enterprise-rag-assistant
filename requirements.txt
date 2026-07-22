@@ -1,6 +1,7 @@
 streamlit
-openai
+streamlit-authenticator
 chromadb
+openai
+pyyaml
 pypdf
 pandas
-openpyxl
