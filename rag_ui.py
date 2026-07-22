@@ -183,10 +183,50 @@ with st.sidebar:
             st.rerun()
 
     st.markdown("---")
+    st.subheader("🗂️ Manage Uploaded Docs")
+
+    # Check which files currently exist in the tenant's private folder
+    existing_files = (
+        os.listdir(docs_folder) if os.path.exists(docs_folder) else []
+    )
+
+    if existing_files:
+        file_to_delete = st.selectbox(
+            "Select a document to remove:", existing_files
+        )
+
+        if st.button("🗑️ Delete Selected File", use_container_width=True):
+            with st.spinner("Removing file & purging database memory..."):
+                # 1. Remove the physical file from the drive
+                file_path = os.path.join(docs_folder, file_to_delete)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+
+                # 2. Connect to ChromaDB and delete the outdated vector collection
+                engine_dir = os.path.dirname(os.path.abspath(__file__))
+                db_path = os.path.join(
+                    engine_dir, "rag_db", "tenants", current_user
+                )
+                chroma_client = chromadb.PersistentClient(path=db_path)
+
+                try:
+                    chroma_client.delete_collection(
+                        name=f"collection_{current_user}"
+                    )
+                except Exception as e:
+                    pass  # Safely ignore if collection is already empty
+
+                # 3. Clear the cache so the RAG engine cleanly re-indexes remaining files
+                load_rag_engine.clear()
+                st.success(f"Successfully deleted '{file_to_delete}'!")
+                st.rerun()
+    else:
+        st.info("No documents uploaded yet.")
+
+    st.markdown("---")
     if st.button("🗑️ Clear Chat History", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
-
 # =====================================================================
 # 5. CONVERSATIONAL MEMORY (Session State)
 # =====================================================================
