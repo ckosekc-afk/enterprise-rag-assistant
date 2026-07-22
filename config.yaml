@@ -1,0 +1,16 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@enterprise.com
+      name: Admin Workspace
+      password: '123'  # You can replace this with a hashed password later!
+    client_a:
+      email: client@enterprise.com
+      name: Client A Workspace
+      password: '456'
+cookie:
+  expiry_days: 30
+  key: super_secret_signature_key
+  name: enterprise_rag_cookie
+preauthorized:
+  emails: []
