@@ -231,7 +231,7 @@ if st.button("🗑️ Clear Chat History", use_container_width=True):
         st.rerun()
 
     # NEW: Download Chat Log Feature
-if st.session_state.messages:
+if "messages" in st.session_state and st.session_state.messages:
         # 1. Format the conversation into a clean text document
         chat_transcript = "=== ENTERPRISE AI CHAT LOG ===\n\n"
         for msg in st.session_state.messages:
