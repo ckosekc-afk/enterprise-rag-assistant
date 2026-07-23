@@ -267,6 +267,19 @@ def render_ai_charts(text):
                 st.caption(f"⚠️ *Chart rendering note: {e}*")
 
 
+def clean_ai_text(text):
+    """Hides raw Python code blocks and technical commentary from the chat display."""
+    # 1. Strip out the Python code block entirely from screen view
+    clean = re.sub(
+        r"```(?:python)?\s*.*?```", "", text, flags=re.DOTALL | re.IGNORECASE
+    ).strip()
+    # 2. Strip out robotic transition phrases
+    clean = re.sub(
+        r"(Here is|Below is|This code).*?:?", "", clean, flags=re.IGNORECASE
+    ).strip()
+    return clean
+
+
 # =====================================================================
 # 5. CONVERSATIONAL MEMORY (Session State)
 # =====================================================================
@@ -275,9 +288,12 @@ if "messages" not in st.session_state:
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
         if message["role"] == "assistant":
+            # Display ONLY the clean explanation, then render the interactive chart
+            st.markdown(clean_ai_text(message["content"]))
             render_ai_charts(message["content"])
+        else:
+            st.markdown(message["content"])
 
 
 # =====================================================================
@@ -312,12 +328,13 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
                 "You have access to both unstructured text documents and complete, intact structured spreadsheet tables. "
                 "When answering questions about spreadsheets, perform exact mathematical comparisons, count rows carefully, and never omit data.\n\n"
                 "CRITICAL VISUALIZATION INSTRUCTIONS:\n"
-                "If the user explicitly asks for a chart, graph, plot, or visual representation of spreadsheet data, you MUST include a self-contained Python code block wrapped in ```python and ``` at the end of your response.\n"
+                "If the user explicitly asks for a chart, graph, plot, or visual representation of spreadsheet data, you MUST include a self-contained Python code block wrapped in ```python and ``` at the very end of your response.\n"
                 "Inside that code block:\n"
-                "1. Construct a clean pandas DataFrame named `data` containing ALL relevant categories, groups, and rows required for the chart. You are strictly forbidden from omitting or skipping any sales reps, products, regions, or data points when building the dataframe.\n"
+                "1. Construct a clean pandas DataFrame named `data` containing ALL relevant categories, groups, and rows required for the chart. You are strictly forbidden from omitting or skipping any employees, departments, regions, or data points when building the dataframe.\n"
                 "2. Use `plotly.express` (referenced as `px`) to generate the requested chart and assign the output to a variable named exactly `fig`.\n"
                 "3. Use a modern, professional color scheme and clear axis labels/titles.\n"
-                "4. DO NOT call `fig.show()` or `st.plotly_chart()` inside your code block—simply assign the figure to `fig`."
+                "4. DO NOT call `fig.show()` or `st.plotly_chart()` inside your code block—simply assign the figure to `fig`.\n"
+                "IMPORTANT FOR USER EXPERIENCE: Do NOT mention the Python code in your text response, do NOT say 'Here is the code:', and do NOT explain how the code works. Simply provide a natural, executive-level business explanation of the insights, followed silently by the code block at the very end."
             ),
         }
     ]
@@ -334,17 +351,25 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
 
     with st.chat_message("assistant"):
         try:
+            # 1. Create an empty container so we can instantly clean the text after streaming
+            message_placeholder = st.empty()
+
             stream = openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=messages_payload,
                 stream=True,
             )
-            ai_answer = st.write_stream(stream)
+            ai_answer = message_placeholder.write_stream(stream)
 
+            # 2. Save the FULL answer (with code) to memory so charts can re-render on reload
             st.session_state.messages.append(
                 {"role": "assistant", "content": ai_answer}
             )
 
+            # 3. Instantly swap out the raw text stream for the clean, code-free explanation!
+            message_placeholder.markdown(clean_ai_text(ai_answer))
+
+            # 4. Render the interactive Plotly chart right below the clean text
             render_ai_charts(ai_answer)
 
             with st.expander("🔍 View Retrieved Database & Spreadsheet Proof"):
