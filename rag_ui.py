@@ -314,7 +314,7 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
                 "CRITICAL VISUALIZATION INSTRUCTIONS:\n"
                 "If the user explicitly asks for a chart, graph, plot, or visual representation of spreadsheet data, you MUST include a self-contained Python code block wrapped in ```python and ``` at the end of your response.\n"
                 "Inside that code block:\n"
-                "1. Construct a clean pandas DataFrame named `data` containing ONLY the relevant data required for the chart.\n"
+                "1. Construct a clean pandas DataFrame named `data` containing ALL relevant categories, groups, and rows required for the chart. You are strictly forbidden from omitting or skipping any sales reps, products, regions, or data points when building the dataframe.\n"
                 "2. Use `plotly.express` (referenced as `px`) to generate the requested chart and assign the output to a variable named exactly `fig`.\n"
                 "3. Use a modern, professional color scheme and clear axis labels/titles.\n"
                 "4. DO NOT call `fig.show()` or `st.plotly_chart()` inside your code block—simply assign the figure to `fig`."
