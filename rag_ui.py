@@ -223,10 +223,29 @@ with st.sidebar:
     else:
         st.info("No documents uploaded yet.")
 
-    st.markdown("---")
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
+st.markdown("---")
+    
+    # Existing Clear Chat button
+if st.button("🗑️ Clear Chat History", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
+
+    # NEW: Download Chat Log Feature
+if st.session_state.messages:
+        # 1. Format the conversation into a clean text document
+        chat_transcript = "=== ENTERPRISE AI CHAT LOG ===\n\n"
+        for msg in st.session_state.messages:
+            role = "👤 You" if msg["role"] == "user" else "🤖 AI Assistant"
+            chat_transcript += f"{role}:\n{msg['content']}\n\n"
+
+        # 2. Create the download button
+        st.download_button(
+            label="💾 Download Chat Transcript",
+            data=chat_transcript,
+            file_name=f"chat_log_{current_user}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
 # =====================================================================
 # 5. CONVERSATIONAL MEMORY (Session State)
 # =====================================================================
