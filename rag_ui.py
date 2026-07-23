@@ -282,34 +282,38 @@ def render_ai_charts(text):
                 st.caption(f"⚠️ *Chart rendering note: {e}*")
 
 def clean_ai_text(text):
-    """Hides raw Python code blocks and technical commentary from the chat display."""
-    clean = re.sub(
+    """Hides raw Python code blocks from the chat display without deleting normal text."""
+    if not text:
+        return ""
+    # Strip ONLY the Python code blocks so normal markdown text is never touched
+    return re.sub(
         r"```(?:python)?\s*.*?```", "", text, flags=re.DOTALL | re.IGNORECASE
     ).strip()
-    clean = re.sub(
-        r"(Here is|Below is|This code).*?:?", "", clean, flags=re.IGNORECASE
-    ).strip()
-    return clean
 
 
 def live_stream_filter(stream_obj, raw_accumulator):
-    """Intercepts tokens live safely: feeds clean text while buffering raw tokens."""
+    """Intercepts live tokens: streams clean text while silently buffering Python code."""
     hide_code = False
     buffer = ""
 
     for chunk in stream_obj:
-        # Guard clause: Ignore empty chunks/usage data from OpenAI stream end
-        if not hasattr(chunk, "choices") or not chunk.choices:
-            continue
+        token = chunk.choices[0].delta.content or ""
+        raw_accumulator.append(token)
 
-        delta = getattr(chunk.choices[0], "delta", None)
-        if not delta:
-            continue
+        if not hide_code:
+            buffer += token
+            # Cut visual feed the instant a code block starts
+            if "```" in buffer:
+                hide_code = True
+                yield buffer.split("```")[0]
+            # Stream text smoothly as long as we aren't holding back a potential code tick
+            elif not buffer.endswith("`"):
+                yield buffer
+                buffer = ""
 
-        token = getattr(delta, "content", "") or ""
-        if not token:
-            continue
-
+    # Flush any remaining text in the buffer if no code block was triggered
+    if not hide_code and buffer:
+        yield buffer
         # Save all tokens into the background memory accumulator
         raw_accumulator.append(token)
 
