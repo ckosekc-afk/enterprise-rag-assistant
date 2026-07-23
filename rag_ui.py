@@ -239,7 +239,7 @@ with st.sidebar:
 
 
 # =====================================================================
-# INTERACTIVE CHART RENDERING ENGINE (Fail-Safe)
+# INTERACTIVE CHART RENDERING & TEXT CLEANING ENGINE
 # =====================================================================
 def render_ai_charts(text):
     """Scans AI responses for Plotly code blocks and renders them safely."""
@@ -269,15 +269,32 @@ def render_ai_charts(text):
 
 def clean_ai_text(text):
     """Hides raw Python code blocks and technical commentary from the chat display."""
-    # 1. Strip out the Python code block entirely from screen view
     clean = re.sub(
         r"```(?:python)?\s*.*?```", "", text, flags=re.DOTALL | re.IGNORECASE
     ).strip()
-    # 2. Strip out robotic transition phrases
     clean = re.sub(
         r"(Here is|Below is|This code).*?:?", "", clean, flags=re.IGNORECASE
     ).strip()
     return clean
+
+
+def live_stream_filter(stream_obj, raw_accumulator):
+    """Intercepts tokens live: feeds clean text to the screen while silently buffering Python code in background memory."""
+    hide_code = False
+    buffer = ""
+
+    for chunk in stream_obj:
+        token = chunk.choices[0].delta.content or ""
+        raw_accumulator.append(token)
+
+        if not hide_code:
+            buffer += token
+            if "```" in buffer:
+                hide_code = True
+                yield buffer.split("```")[0]
+            elif not buffer.endswith("`"):
+                yield buffer
+                buffer = ""
 
 
 # =====================================================================
@@ -289,7 +306,6 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         if message["role"] == "assistant":
-            # Display ONLY the clean explanation, then render the interactive chart
             st.markdown(clean_ai_text(message["content"]))
             render_ai_charts(message["content"])
         else:
@@ -297,7 +313,7 @@ for message in st.session_state.messages:
 
 
 # =====================================================================
-# 6. THE INTERACTIVE CHAT BOX (With Real-Time Streaming & Plotly Charts!)
+# 6. THE INTERACTIVE CHAT BOX (With Zero-Flash Streaming & Plotly Charts!)
 # =====================================================================
 if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet charts..."):
 
@@ -351,26 +367,23 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
 
     with st.chat_message("assistant"):
         try:
-            # 1. Create an empty container so we can instantly clean the text after streaming
-            message_placeholder = st.empty()
+            raw_tokens = []
 
             stream = openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=messages_payload,
                 stream=True,
             )
-            ai_answer = message_placeholder.write_stream(stream)
 
-            # 2. Save the FULL answer (with code) to memory so charts can re-render on reload
+            st.write_stream(live_stream_filter(stream, raw_tokens))
+
+            full_ai_answer = "".join(raw_tokens)
+
             st.session_state.messages.append(
-                {"role": "assistant", "content": ai_answer}
+                {"role": "assistant", "content": full_ai_answer}
             )
 
-            # 3. Instantly swap out the raw text stream for the clean, code-free explanation!
-            message_placeholder.markdown(clean_ai_text(ai_answer))
-
-            # 4. Render the interactive Plotly chart right below the clean text
-            render_ai_charts(ai_answer)
+            render_ai_charts(full_ai_answer)
 
             with st.expander("🔍 View Retrieved Database & Spreadsheet Proof"):
                 st.info(full_combined_context)
