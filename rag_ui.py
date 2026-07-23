@@ -242,12 +242,12 @@ with st.sidebar:
 # INTERACTIVE CHART RENDERING & TEXT CLEANING ENGINE
 # =====================================================================
 def render_ai_charts(text):
-    """Scans AI responses for Plotly code blocks and renders them safely."""
+    """Scans AI responses for Plotly code blocks, renders them, and attaches a data export button."""
     code_blocks = re.findall(
         r"```(?:python)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE
     )
 
-    for code in code_blocks:
+    for i, code in enumerate(code_blocks):
         if "fig" in code:
             try:
                 clean_code = re.sub(r"fig\.show\(\)", "", code)
@@ -258,14 +258,28 @@ def render_ai_charts(text):
                     "st": st,
                 }
 
+                # Execute the AI's generated Python script
                 exec(clean_code, exec_scope)
 
+                # 1. Render the Plotly Chart
                 fig = exec_scope.get("fig") or exec_scope.get("figure")
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
+
+                # 2. Extract the cleaned DataFrame and add an Export Button!
+                df_data = exec_scope.get("data")
+                if isinstance(df_data, pd.DataFrame) and not df_data.empty:
+                    csv_data = df_data.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        label="📥 Download Cleaned Data (.csv)",
+                        data=csv_data,
+                        file_name=f"ai_filtered_report_{i+1}.csv",
+                        mime="text/csv",
+                        key=f"export_btn_{len(text)}_{i}",
+                        use_container_width=False,
+                    )
             except Exception as e:
                 st.caption(f"⚠️ *Chart rendering note: {e}*")
-
 
 def clean_ai_text(text):
     """Hides raw Python code blocks and technical commentary from the chat display."""
@@ -358,17 +372,22 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
         {
             "role": "system",
             "content": (
-                "You are an elite enterprise AI data assistant with advanced data visualization capabilities. "
+                "You are an elite enterprise AI data assistant with advanced data visualization and auditing capabilities. "
                 "You have access to both unstructured text documents and complete, intact structured spreadsheet tables. "
                 "When answering questions about spreadsheets, perform exact mathematical comparisons, count rows carefully, and never omit data.\n\n"
+                "CRITICAL AUDIT & CITATION INSTRUCTIONS:\n"
+                "1. You must act as an auditable research analyst. Every factual claim, number, policy, or metric you state MUST end with an inline footnote citation.\n"
+                "2. For text documents (PDF/TXT), cite the source filename and section/paragraph where possible, e.g., [Source: Employee_Handbook.pdf].\n"
+                "3. For spreadsheet data, cite the exact table name or row/column context, e.g., [Source: Q3_Revenue.csv, Row 14].\n"
+                "4. Never invent facts or numbers. If the data is missing from the provided context, explicitly state: 'No supporting data found in workspace archives.'\n\n"
                 "CRITICAL VISUALIZATION INSTRUCTIONS:\n"
                 "If the user explicitly asks for a chart, graph, plot, or visual representation of spreadsheet data, you MUST include a self-contained Python code block wrapped in ```python and ``` at the very end of your response.\n"
                 "Inside that code block:\n"
-                "1. Construct a clean pandas DataFrame named `data` containing ALL relevant categories, groups, and rows required for the chart. You are strictly forbidden from omitting or skipping any employees, departments, regions, or data points when building the dataframe.\n"
+                "1. Construct a clean pandas DataFrame named `data` containing ALL relevant categories, groups, and rows required for the chart. You are strictly forbidden from omitting or skipping any data points.\n"
                 "2. Use `plotly.express` (referenced as `px`) to generate the requested chart and assign the output to a variable named exactly `fig`.\n"
                 "3. Use a modern, professional color scheme and clear axis labels/titles.\n"
                 "4. DO NOT call `fig.show()` or `st.plotly_chart()` inside your code block—simply assign the figure to `fig`.\n"
-                "IMPORTANT FOR USER EXPERIENCE: Do NOT mention the Python code in your text response, do NOT say 'Here is the code:', and do NOT explain how the code works. Simply provide a natural, executive-level business explanation of the insights, followed silently by the code block at the very end."
+                "IMPORTANT FOR USER EXPERIENCE: Do NOT mention the Python code in your text response, do NOT say 'Here is the code:', and do NOT explain how the code works. Simply provide a natural, executive-level business explanation of the insights with citations, followed silently by the code block at the very end."
             ),
         }
     ]
