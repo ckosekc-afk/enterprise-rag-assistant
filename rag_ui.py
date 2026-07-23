@@ -279,22 +279,40 @@ def clean_ai_text(text):
 
 
 def live_stream_filter(stream_obj, raw_accumulator):
-    """Intercepts tokens live: feeds clean text to the screen while silently buffering Python code in background memory."""
+    """Intercepts tokens live safely: feeds clean text while buffering raw tokens."""
     hide_code = False
     buffer = ""
 
     for chunk in stream_obj:
-        token = chunk.choices[0].delta.content or ""
+        # Guard clause: Ignore empty chunks/usage data from OpenAI stream end
+        if not hasattr(chunk, "choices") or not chunk.choices:
+            continue
+
+        delta = getattr(chunk.choices[0], "delta", None)
+        if not delta:
+            continue
+
+        token = getattr(delta, "content", "") or ""
+        if not token:
+            continue
+
+        # Save all tokens into the background memory accumulator
         raw_accumulator.append(token)
 
         if not hide_code:
             buffer += token
             if "```" in buffer:
                 hide_code = True
-                yield buffer.split("```")[0]
+                clean_prefix = buffer.split("```")[0]
+                if clean_prefix:
+                    yield clean_prefix
+                buffer = ""
             elif not buffer.endswith("`"):
                 yield buffer
                 buffer = ""
+
+    if not hide_code and buffer:
+        yield buffer
 
 
 # =====================================================================
