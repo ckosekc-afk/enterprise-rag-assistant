@@ -238,7 +238,7 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # =====================================================================
-# 6. THE INTERACTIVE CHAT BOX
+# 6. THE INTERACTIVE CHAT BOX (With Real-Time Response Streaming!)
 # =====================================================================
 if query := st.chat_input("Ask about policies, syllabi, or spreadsheet data..."):
 
@@ -282,20 +282,25 @@ if query := st.chat_input("Ask about policies, syllabi, or spreadsheet data...")
     )
 
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing tables & searching documents..."):
-            try:
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o", messages=messages_payload, timeout=15.0
-                )
-                ai_answer = response.choices[0].message.content
-                st.markdown(ai_answer)
+        try:
+            # 1. Trigger the OpenAI response stream generator
+            stream = openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages_payload,
+                stream=True,  # Enables chunk-by-chunk output!
+            )
 
-                with st.expander("🔍 View Retrieved Database & Spreadsheet Proof"):
-                    st.info(full_combined_context)
+            # 2. Render words on screen in real-time as they arrive
+            ai_answer = st.write_stream(stream)
 
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": ai_answer}
-                )
+            # 3. Display data proof expander once streaming finishes
+            with st.expander("🔍 View Retrieved Database & Spreadsheet Proof"):
+                st.info(full_combined_context)
 
-            except Exception as e:
-                st.error(f"Error connecting to AI: {e}")
+            # 4. Save the full completed string into chat memory
+            st.session_state.messages.append(
+                {"role": "assistant", "content": ai_answer}
+            )
+
+        except Exception as e:
+            st.error(f"Error connecting to AI: {e}")
