@@ -178,6 +178,41 @@ with st.sidebar:
             st.success("Files successfully processed!")
             st.rerun()
 
+    # --- SYNTHETIC DEMO SANDBOX ---
+    st.markdown("---")
+    st.subheader("🧪 Synthetic Demo Sandbox")
+    st.caption("Load pre-configured financial datasets for instant zero-risk testing.")
+
+    if st.button("⚡ Load Demo Financial Vault", use_container_width=True):
+        with st.spinner("Generating synthetic trust policies & portfolio holdings..."):
+            demo_csv_path = os.path.join(docs_folder, "Synthetic_Q3_Holdings.csv")
+            demo_df = pd.DataFrame({
+                'Client Account': ['Smith Trust', 'Smith Trust', 'Vance IRA', 'Vance IRA', 'Rostova Endowment', 'Rostova Endowment'],
+                'Ticker': ['VTI', 'VXUS', 'BND', 'SPY', 'QQQ', 'ARKK'],
+                'Asset Class': ['US Equity', 'Intl Equity', 'Fixed Income', 'US Equity', 'Tech Equity', 'Speculative Growth'],
+                'Region': ['North America', 'Global', 'North America', 'North America', 'North America', 'Global'],
+                'Total Value': [450000, 180000, 320000, 610000, 890000, 150000],
+                'Expense Ratio': [0.03, 0.07, 0.03, 0.09, 0.20, 0.75]
+            })
+            demo_df.to_csv(demo_csv_path, index=False)
+
+            demo_txt_path = os.path.join(docs_folder, "Smith_Family_Trust_Policy.txt")
+            trust_policy_text = (
+                "=== SMITH FAMILY TRUST POLICY & FIDUCIARY GUIDELINES ===\n\n"
+                "1. ASSET ALLOCATION LIMITS: The Smith Family Trust mandates a maximum exposure of 20% to International Equities "
+                "and a minimum baseline of 25% in Fixed Income (Bonds) to preserve capital.\n\n"
+                "2. EXPENSE RATIO THRESHOLDS: To protect long-term compounding, no actively managed fund or ETF with an expense ratio "
+                "exceeding 0.50% may be held in the primary endowment without formal written authorization from the trustees.\n\n"
+                "3. REBALANCING SCHEDULE: Portfolio rebalancing must occur quarterly. Any single asset class that drifts more than 5% "
+                "from its target allocation must be rebalanced within 14 business days of quarter-end."
+            )
+            with open(demo_txt_path, "w", encoding="utf-8") as f:
+                f.write(trust_policy_text)
+
+            load_rag_engine.clear()
+            st.success("Demo Vault successfully loaded into active memory!")
+            st.rerun()
+
     st.markdown("---")
     st.subheader("🗂️ Manage Uploaded Docs")
 
@@ -258,15 +293,12 @@ def render_ai_charts(text):
                     "st": st,
                 }
 
-                # Execute the AI's generated Python script
                 exec(clean_code, exec_scope)
 
-                # 1. Render the Plotly Chart
                 fig = exec_scope.get("fig") or exec_scope.get("figure")
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
 
-                # 2. Extract the cleaned DataFrame and add an Export Button!
                 df_data = exec_scope.get("data")
                 if isinstance(df_data, pd.DataFrame) and not df_data.empty:
                     csv_data = df_data.to_csv(index=False).encode("utf-8")
@@ -281,11 +313,11 @@ def render_ai_charts(text):
             except Exception as e:
                 st.caption(f"⚠️ *Chart rendering note: {e}*")
 
+
 def clean_ai_text(text):
     """Hides raw Python code blocks from the chat display without deleting normal text."""
     if not text:
         return ""
-    # Strip ONLY the Python code blocks so normal markdown text is never touched
     return re.sub(
         r"```(?:python)?\s*.*?```", "", text, flags=re.DOTALL | re.IGNORECASE
     ).strip()
@@ -297,24 +329,17 @@ def live_stream_filter(stream_obj, raw_accumulator):
     buffer = ""
 
     for chunk in stream_obj:
-        token = chunk.choices[0].delta.content or ""
-        raw_accumulator.append(token)
+        if not hasattr(chunk, "choices") or not chunk.choices:
+            continue
 
-        if not hide_code:
-            buffer += token
-            # Cut visual feed the instant a code block starts
-            if "```" in buffer:
-                hide_code = True
-                yield buffer.split("```")[0]
-            # Stream text smoothly as long as we aren't holding back a potential code tick
-            elif not buffer.endswith("`"):
-                yield buffer
-                buffer = ""
+        delta = getattr(chunk.choices[0], "delta", None)
+        if not delta:
+            continue
 
-    # Flush any remaining text in the buffer if no code block was triggered
-    if not hide_code and buffer:
-        yield buffer
-        # Save all tokens into the background memory accumulator
+        token = getattr(delta, "content", "") or ""
+        if not token:
+            continue
+
         raw_accumulator.append(token)
 
         if not hide_code:
