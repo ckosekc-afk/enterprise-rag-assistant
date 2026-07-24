@@ -76,13 +76,26 @@ def upload_file_to_supabase(user_id, local_file_path, filename):
         print(f"Supabase Upload Exception for {filename}: {e}")
 
 def delete_file_from_supabase(user_id, filename):
-    """Deletes a file from Supabase cloud storage."""
+    """Deletes a file from Supabase and outputs live API diagnostic telemetry to the screen."""
     cloud_path = f"{user_id}/{filename}"
     try:
-        supabase.storage.from_(BUCKET_NAME).remove([cloud_path])
+        # 1. First, let's ask Supabase what filenames it ACTUALLY sees inside your cloud folder
+        remote_files = supabase.storage.from_(BUCKET_NAME).list(user_id)
+        actual_filenames_in_cloud = [item.get("name") for item in remote_files] if remote_files else []
+        
+        # 2. Attempt the deletion
+        res = supabase.storage.from_(BUCKET_NAME).remove([cloud_path])
+        
+        # 3. Print the raw truth directly onto your Streamlit screen so we can read it
+        st.info(f"🔍 **Cloud Diagnostic:**\n"
+                f"* **We told Supabase to delete:** `{cloud_path}`\n"
+                f"* **Files Supabase actually sees in `{user_id}`:** `{actual_filenames_in_cloud}`\n"
+                f"* **Raw Supabase API Response:** `{res}`")
+                
+        return res
     except Exception as e:
-        print(f"Supabase Delete Exception for {filename}: {e}")
-
+        st.error(f"❌ Cloud Deletion Exception: {e}")
+        return None
 def sync_supabase_to_local(user_id, local_docs_folder):
     """Downloads all cloud files for this user to local storage on engine startup."""
     try:
