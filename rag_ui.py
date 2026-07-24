@@ -9,6 +9,7 @@ from yaml.loader import SafeLoader
 from pypdf import PdfReader
 import pandas as pd
 import plotly.express as px
+from supabase import create_client
 
 # =====================================================================
 # 1. STREAMLIT PAGE SETUP & STYLING
@@ -16,7 +17,7 @@ import plotly.express as px
 st.set_page_config(page_title="Enterprise AI Assistant", page_icon="🏢", layout="wide")
 
 st.title("🏢 Enterprise AI Assistant")
-st.caption("Powered by OpenAI GPT-4o, ChromaDB (Text Engine), and Pandas (Data Engine)")
+st.caption("Powered by OpenAI GPT-4o, ChromaDB, Pandas, and Supabase Vaults")
 
 
 # =====================================================================
@@ -49,7 +50,60 @@ name = st.session_state.get("name")
 
 
 # =====================================================================
-# 3. HYBRID ENGINE SETUP (Multi-Tenant Isolated Architecture!)
+# 3. SUPABASE CLOUD VAULT ENGINE
+# =====================================================================
+@st.cache_resource(show_spinner=False)
+def get_supabase_client():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = get_supabase_client()
+BUCKET_NAME = "client-vaults"
+
+def upload_file_to_supabase(user_id, local_file_path, filename):
+    """Uploads a local file to Supabase cloud storage under the user's folder."""
+    cloud_path = f"{user_id}/{filename}"
+    with open(local_file_path, "rb") as f:
+        file_bytes = f.read()
+    try:
+        supabase.storage.from_(BUCKET_NAME).upload(
+            file=file_bytes,
+            path=cloud_path,
+            file_options={"upsert": "true"}
+        )
+    except Exception as e:
+        print(f"Supabase Upload Exception for {filename}: {e}")
+
+def delete_file_from_supabase(user_id, filename):
+    """Deletes a file from Supabase cloud storage."""
+    cloud_path = f"{user_id}/{filename}"
+    try:
+        supabase.storage.from_(BUCKET_NAME).remove([cloud_path])
+    except Exception as e:
+        print(f"Supabase Delete Exception for {filename}: {e}")
+
+def sync_supabase_to_local(user_id, local_docs_folder):
+    """Downloads all cloud files for this user to local storage on engine startup."""
+    try:
+        remote_files = supabase.storage.from_(BUCKET_NAME).list(user_id)
+        for item in remote_files:
+            filename = item.get("name")
+            if not filename or filename == ".emptyFolderPlaceholder":
+                continue
+            
+            local_path = os.path.join(local_docs_folder, filename)
+            if not os.path.exists(local_path):
+                cloud_path = f"{user_id}/{filename}"
+                file_bytes = supabase.storage.from_(BUCKET_NAME).download(cloud_path)
+                with open(local_path, "wb") as f:
+                    f.write(file_bytes)
+    except Exception as e:
+        print(f"Supabase Sync Warning: {e}")
+
+
+# =====================================================================
+# 4. HYBRID ENGINE SETUP (Multi-Tenant Isolated Architecture!)
 # =====================================================================
 @st.cache_resource(show_spinner=False)
 def load_rag_engine(user_id):
@@ -62,6 +116,9 @@ def load_rag_engine(user_id):
         os.makedirs(docs_folder)
     if not os.path.exists(db_path):
         os.makedirs(db_path)
+
+    # Sync any persistent files stored in Supabase Vault down to local tenant folder
+    sync_supabase_to_local(user_id, docs_folder)
 
     chroma_client = chromadb.PersistentClient(path=db_path)
     collection = chroma_client.get_or_create_collection(
@@ -140,7 +197,7 @@ collection, openai_client, chunks_loaded, spreadsheet_tables, docs_folder = (
 
 
 # =====================================================================
-# 4. THE SIDEBAR DASHBOARD
+# 5. THE SIDEBAR DASHBOARD
 # =====================================================================
 with st.sidebar:
     st.success(f"👤 Logged in as: **{name}**")
@@ -148,7 +205,7 @@ with st.sidebar:
     st.markdown("---")
 
     st.header("📊 System Dashboard")
-    st.success("🟢 Two-Brain Hybrid Engine Online")
+    st.success("🟢 Cloud Vault & Two-Brain Engine Online")
 
     st.markdown("---")
     st.subheader("Database Stats")
@@ -168,14 +225,17 @@ with st.sidebar:
     if uploaded_files and st.button(
         "🚀 Process & Ingest Files", use_container_width=True
     ):
-        with st.spinner("Routing files to Hybrid Engines..."):
+        with st.spinner("Vaulting files to Supabase & Hybrid Engines..."):
             for uploaded_file in uploaded_files:
                 file_path = os.path.join(docs_folder, uploaded_file.name)
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
+                
+                # Sync file directly up to Supabase Cloud Storage
+                upload_file_to_supabase(current_user, file_path, uploaded_file.name)
 
             load_rag_engine.clear()
-            st.success("Files successfully processed!")
+            st.success("Files successfully processed and vaulted!")
             st.rerun()
 
     # --- SYNTHETIC DEMO SANDBOX ---
@@ -195,6 +255,7 @@ with st.sidebar:
                 'Expense Ratio': [0.03, 0.07, 0.03, 0.09, 0.20, 0.75]
             })
             demo_df.to_csv(demo_csv_path, index=False)
+            upload_file_to_supabase(current_user, demo_csv_path, "Synthetic_Q3_Holdings.csv")
 
             demo_txt_path = os.path.join(docs_folder, "Smith_Family_Trust_Policy.txt")
             trust_policy_text = (
@@ -208,6 +269,7 @@ with st.sidebar:
             )
             with open(demo_txt_path, "w", encoding="utf-8") as f:
                 f.write(trust_policy_text)
+            upload_file_to_supabase(current_user, demo_txt_path, "Smith_Family_Trust_Policy.txt")
 
             load_rag_engine.clear()
             st.success("Demo Vault successfully loaded into active memory!")
@@ -230,6 +292,9 @@ with st.sidebar:
                 file_path = os.path.join(docs_folder, file_to_delete)
                 if os.path.exists(file_path):
                     os.remove(file_path)
+
+                # Delete from Supabase Cloud Vault
+                delete_file_from_supabase(current_user, file_to_delete)
 
                 engine_dir = os.path.dirname(os.path.abspath(__file__))
                 db_path = os.path.join(
@@ -359,7 +424,7 @@ def live_stream_filter(stream_obj, raw_accumulator):
 
 
 # =====================================================================
-# 5. CONVERSATIONAL MEMORY (Session State)
+# 6. CONVERSATIONAL MEMORY (Session State)
 # =====================================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -374,7 +439,7 @@ for message in st.session_state.messages:
 
 
 # =====================================================================
-# 6. THE INTERACTIVE CHAT BOX (With Zero-Flash Streaming & Plotly Charts!)
+# 7. THE INTERACTIVE CHAT BOX (With Zero-Flash Streaming & Plotly Charts!)
 # =====================================================================
 if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet charts..."):
 
