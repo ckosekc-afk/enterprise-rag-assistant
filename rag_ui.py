@@ -19,9 +19,40 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 # =====================================================================
 # 1. STREAMLIT PAGE SETUP & STYLING
 # =====================================================================
-st.set_page_config(page_title="Enterprise AI Assistant", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="QuantLex", page_icon="📊", layout="wide")
+import streamlit as st
 
-st.title("🏢 Enterprise AI Assistant")
+# 1. Page Config (Keep your existing config here)
+st.set_page_config(page_title="QuantLex", page_icon="🏢", layout="wide")
+
+# 2. Initialize authentication memory
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# 3. The Login Wall Checkpoint
+if not st.session_state["authenticated"]:
+    st.title("🏢 QuantLex Client Portal")
+    st.markdown("Please enter your client access key to enter the secure workspace.")
+    
+    # Create a simple login form
+    with st.form("login_form", clear_on_submit=False):
+        password_input = st.text_input("Access Key", type="password")
+        submit_button = st.form_submit_button("Enter Workspace", type="primary")
+        
+        if submit_button:
+            # Check against Streamlit Secrets (configured in Step 2)
+            if password_input == st.secrets.get("APP_PASSWORD", "quantlex2026"):
+                st.session_state["authenticated"] = True
+                st.rerun()  # Refresh page to unlock the app
+            else:
+                st.error("Invalid access key. Please contact QuantLex support.")
+                
+    # Halt all execution here if not authenticated
+    st.stop()
+
+# --- ALL YOUR EXISTING RAG_UI.PY CODE GOES BELOW THIS LINE ---
+# (No need to indent your existing code!)
+st.title("QuantLex")
 st.caption("Powered by OpenAI GPT-4o, ChromaDB, Pandas, Supabase Vaults & Word Brief Generation")
 
 
@@ -283,7 +314,11 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🗂️ Manage Uploaded Docs")
-
+with st.sidebar:
+    st.divider()
+    if st.button("Log Out"):
+        st.session_state["authenticated"] = False
+        st.rerun()
     existing_files = (
         os.listdir(docs_folder) if os.path.exists(docs_folder) else []
     )
