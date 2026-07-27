@@ -7,3 +7,4 @@ pypdf
 pandas
 plotly
 supabase
+python-docx

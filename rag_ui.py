@@ -96,6 +96,7 @@ def delete_file_from_supabase(user_id, filename):
     except Exception as e:
         st.error(f"❌ Cloud Deletion Exception: {e}")
         return None
+    
 def sync_supabase_to_local(user_id, local_docs_folder):
     """Downloads all cloud files for this user to local storage on engine startup."""
     try:
