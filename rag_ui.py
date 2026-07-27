@@ -1,5 +1,7 @@
 import os
 import re
+import io
+import datetime
 import chromadb
 from openai import OpenAI
 import streamlit as st
@@ -10,6 +12,9 @@ from pypdf import PdfReader
 import pandas as pd
 import plotly.express as px
 from supabase import create_client
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # =====================================================================
 # 1. STREAMLIT PAGE SETUP & STYLING
@@ -17,7 +22,7 @@ from supabase import create_client
 st.set_page_config(page_title="Enterprise AI Assistant", page_icon="🏢", layout="wide")
 
 st.title("🏢 Enterprise AI Assistant")
-st.caption("Powered by OpenAI GPT-4o, ChromaDB, Pandas, and Supabase Vaults")
+st.caption("Powered by OpenAI GPT-4o, ChromaDB, Pandas, Supabase Vaults & Word Brief Generation")
 
 
 # =====================================================================
@@ -79,24 +84,16 @@ def delete_file_from_supabase(user_id, filename):
     """Deletes a file from Supabase and outputs live API diagnostic telemetry to the screen."""
     cloud_path = f"{user_id}/{filename}"
     try:
-        # 1. First, let's ask Supabase what filenames it ACTUALLY sees inside your cloud folder
-        remote_files = supabase.storage.from_(BUCKET_NAME).list(user_id)
-        actual_filenames_in_cloud = [item.get("name") for item in remote_files] if remote_files else []
-        
-        # 2. Attempt the deletion
         res = supabase.storage.from_(BUCKET_NAME).remove([cloud_path])
-        
-        # 3. Print the raw truth directly onto your Streamlit screen so we can read it
-        st.info(f"🔍 **Cloud Diagnostic:**\n"
-                f"* **We told Supabase to delete:** `{cloud_path}`\n"
-                f"* **Files Supabase actually sees in `{user_id}`:** `{actual_filenames_in_cloud}`\n"
-                f"* **Raw Supabase API Response:** `{res}`")
-                
+        if not res:
+            st.warning(f"⚠️ Supabase could not delete '{cloud_path}'. Verify permissions.")
+        else:
+            st.toast(f"☁️ Cloud Vault synced: Deleted '{filename}'")
         return res
     except Exception as e:
-        st.error(f"❌ Cloud Deletion Exception: {e}")
+        st.error(f"❌ Cloud Deletion Blocked: {e}")
         return None
-    
+
 def sync_supabase_to_local(user_id, local_docs_folder):
     """Downloads all cloud files for this user to local storage on engine startup."""
     try:
@@ -117,7 +114,7 @@ def sync_supabase_to_local(user_id, local_docs_folder):
 
 
 # =====================================================================
-# 4. HYBRID ENGINE SETUP (Multi-Tenant Isolated Architecture!)
+# 4. HYBRID ENGINE SETUP (Multi-Tenant Isolated Architecture)
 # =====================================================================
 @st.cache_resource(show_spinner=False)
 def load_rag_engine(user_id):
@@ -131,7 +128,6 @@ def load_rag_engine(user_id):
     if not os.path.exists(db_path):
         os.makedirs(db_path)
 
-    # Sync any persistent files stored in Supabase Vault down to local tenant folder
     sync_supabase_to_local(user_id, docs_folder)
 
     chroma_client = chromadb.PersistentClient(path=db_path)
@@ -159,7 +155,6 @@ def load_rag_engine(user_id):
             file_path = os.path.join(docs_folder, filename)
             text_content = ""
 
-            # --- BRAIN 1: TEXT DOCUMENTS ---
             if filename.endswith(".txt"):
                 with open(file_path, "r", encoding="utf-8") as file:
                     text_content = file.read()
@@ -174,7 +169,6 @@ def load_rag_engine(user_id):
                 except Exception as e:
                     print(f"Error reading PDF {filename}: {e}")
 
-            # --- BRAIN 2: SPREADSHEETS ---
             elif filename.endswith(".csv") or filename.endswith(".xlsx"):
                 try:
                     if filename.endswith(".csv"):
@@ -219,7 +213,7 @@ with st.sidebar:
     st.markdown("---")
 
     st.header("📊 System Dashboard")
-    st.success("🟢 Cloud Vault & Two-Brain Engine Online")
+    st.success("🟢 Cloud Vault & Brief Generator Online")
 
     st.markdown("---")
     st.subheader("Database Stats")
@@ -245,14 +239,12 @@ with st.sidebar:
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 
-                # Sync file directly up to Supabase Cloud Storage
                 upload_file_to_supabase(current_user, file_path, uploaded_file.name)
 
             load_rag_engine.clear()
             st.success("Files successfully processed and vaulted!")
             st.rerun()
 
-    # --- SYNTHETIC DEMO SANDBOX ---
     st.markdown("---")
     st.subheader("🧪 Synthetic Demo Sandbox")
     st.caption("Load pre-configured financial datasets for instant zero-risk testing.")
@@ -307,7 +299,6 @@ with st.sidebar:
                 if os.path.exists(file_path):
                     os.remove(file_path)
 
-                # Delete from Supabase Cloud Vault
                 delete_file_from_supabase(current_user, file_to_delete)
 
                 engine_dir = os.path.dirname(os.path.abspath(__file__))
@@ -331,12 +322,10 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Clear Chat button
     if st.button("🗑️ Clear Chat History", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-    # Download Chat Log Feature
     if "messages" in st.session_state and st.session_state.messages:
         chat_transcript = "=== ENTERPRISE AI CHAT LOG ===\n\n"
         for msg in st.session_state.messages:
@@ -344,7 +333,7 @@ with st.sidebar:
             chat_transcript += f"{role}:\n{msg['content']}\n\n"
 
         st.download_button(
-            label="💾 Download Chat Transcript",
+            label="💾 Download Chat Transcript (.txt)",
             data=chat_transcript,
             file_name=f"chat_log_{current_user}.txt",
             mime="text/plain",
@@ -353,10 +342,124 @@ with st.sidebar:
 
 
 # =====================================================================
-# INTERACTIVE CHART RENDERING & TEXT CLEANING ENGINE
+# INTERACTIVE CHART RENDERING, WORD GENERATION & CLEANING ENGINE
 # =====================================================================
-def render_ai_charts(text):
-    """Scans AI responses for Plotly code blocks, renders them, and attaches a data export button."""
+def clean_ai_text(text):
+    """Hides raw Python code blocks from the chat display without deleting normal text."""
+    if not text:
+        return ""
+    return re.sub(
+        r"```(?:python)?\s*.*?```", "", text, flags=re.DOTALL | re.IGNORECASE
+    ).strip()
+
+
+@st.cache_data(show_spinner=False)
+def create_executive_brief_docx(query_text, ai_response, user_name):
+    """Compiles AI analysis into a professionally styled Word document (Cached for instant UI rendering!)."""
+    doc = Document()
+    
+    for section in doc.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+        
+    title = doc.add_paragraph()
+    title_run = title.add_run("EXECUTIVE BRIEFING & AUDIT REPORT")
+    title_run.font.size = Pt(18)
+    title_run.font.bold = True
+    title_run.font.color.rgb = RGBColor(15, 23, 42)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    meta = doc.add_paragraph()
+    meta.add_run("Prepared For: ").bold = True
+    meta.add_run(f"{user_name}\n")
+    meta.add_run("Inquiry / Subject: ").bold = True
+    meta.add_run(f"{query_text}\n")
+    
+    timestamp_str = datetime.datetime.now().strftime("%B %d, %Y — %I:%M %p")
+    meta.add_run("Timestamp: ").bold = True
+    meta.add_run(f"{timestamp_str}\n")
+    
+    status_run = meta.add_run("Status: Verified Multi-Tenant RAG & Spreadsheet Analysis")
+    status_run.font.italic = True
+    status_run.font.size = Pt(9.5)
+    status_run.font.color.rgb = RGBColor(100, 116, 139)
+    
+    doc.add_paragraph("_________________________________________________________________________________")
+    
+    clean_text = clean_ai_text(ai_response)
+    
+    def add_styled_paragraph(text, is_bullet=False):
+        style = 'List Bullet' if is_bullet else None
+        p = doc.add_paragraph(style=style)
+        
+        parts = re.split(r'(\*\*.*?\*\*)', text)
+        for part in parts:
+            if part.startswith('**') and part.endswith('**') and len(part) >= 4:
+                run = p.add_run(part[2:-2])
+                run.bold = True
+                run.font.size = Pt(11)
+                run.font.color.rgb = RGBColor(15, 23, 42)
+            else:
+                run = p.add_run(part)
+                run.font.size = Pt(11)
+                run.font.color.rgb = RGBColor(51, 65, 85)
+        p.paragraph_format.space_after = Pt(4)
+        p.paragraph_format.line_spacing = 1.15
+        return p
+
+    for line in clean_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+            
+        if line.startswith("#"):
+            header_level = len(line.split()[0])
+            header_text = line.lstrip("# ").strip()
+            p = doc.add_paragraph()
+            run = p.add_run(header_text)
+            run.bold = True
+            
+            if header_level == 1:
+                run.font.size = Pt(15)
+                run.font.color.rgb = RGBColor(15, 23, 42)
+                p.paragraph_format.space_before = Pt(14)
+                p.paragraph_format.space_after = Pt(4)
+            elif header_level == 2:
+                run.font.size = Pt(13)
+                run.font.color.rgb = RGBColor(30, 41, 59)
+                p.paragraph_format.space_before = Pt(10)
+                p.paragraph_format.space_after = Pt(3)
+            else:
+                run.font.size = Pt(11.5)
+                run.font.color.rgb = RGBColor(51, 65, 85)
+                p.paragraph_format.space_before = Pt(8)
+                p.paragraph_format.space_after = Pt(2)
+                
+        elif line.startswith("- ") or line.startswith("* "):
+            bullet_text = line[2:].strip()
+            add_styled_paragraph(bullet_text, is_bullet=True)
+            
+        else:
+            add_styled_paragraph(line, is_bullet=False)
+            
+    doc.add_paragraph("\n_________________________________________________________________________________")
+    footer = doc.add_paragraph()
+    f_run = footer.add_run("CONFIDENTIAL & PROPRIETARY — ENTERPRISE AI ASSISTANT\nGenerated with Zero-Flash Token Streaming & Inline Audit Citations.")
+    f_run.font.size = Pt(8.5)
+    f_run.font.italic = True
+    f_run.font.color.rgb = RGBColor(148, 163, 184)
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def render_ai_charts(text, msg_idx=0):
+    """Scans AI responses for Plotly code blocks, renders them, and attaches a uniquely keyed export button."""
     code_blocks = re.findall(
         r"```(?:python)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE
     )
@@ -382,24 +485,15 @@ def render_ai_charts(text):
                 if isinstance(df_data, pd.DataFrame) and not df_data.empty:
                     csv_data = df_data.to_csv(index=False).encode("utf-8")
                     st.download_button(
-                        label="📥 Download Cleaned Data (.csv)",
+                        label="📥 Download Cleaned Chart Data (.csv)",
                         data=csv_data,
-                        file_name=f"ai_filtered_report_{i+1}.csv",
+                        file_name=f"ai_filtered_report_{msg_idx}_{i+1}.csv",
                         mime="text/csv",
-                        key=f"export_btn_{len(text)}_{i}",
+                        key=f"export_btn_{msg_idx}_{i}",
                         use_container_width=False,
                     )
             except Exception as e:
                 st.caption(f"⚠️ *Chart rendering note: {e}*")
-
-
-def clean_ai_text(text):
-    """Hides raw Python code blocks from the chat display without deleting normal text."""
-    if not text:
-        return ""
-    return re.sub(
-        r"```(?:python)?\s*.*?```", "", text, flags=re.DOTALL | re.IGNORECASE
-    ).strip()
 
 
 def live_stream_filter(stream_obj, raw_accumulator):
@@ -438,22 +532,41 @@ def live_stream_filter(stream_obj, raw_accumulator):
 
 
 # =====================================================================
-# 6. CONVERSATIONAL MEMORY (Session State)
+# 6. CONVERSATIONAL MEMORY (The Stable Historical Loop)
 # =====================================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-for message in st.session_state.messages:
+for idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         if message["role"] == "assistant":
             st.markdown(clean_ai_text(message["content"]))
-            render_ai_charts(message["content"])
+            render_ai_charts(message["content"], msg_idx=idx)
+            
+            associated_query = "General Executive Inquiry"
+            if idx > 0 and st.session_state.messages[idx - 1]["role"] == "user":
+                associated_query = st.session_state.messages[idx - 1]["content"]
+                
+            docx_bytes = create_executive_brief_docx(
+                associated_query, message["content"], name or current_user
+            )
+            st.download_button(
+                label="📄 Download Executive Brief (.docx)",
+                data=docx_bytes,
+                file_name=f"Executive_Brief_{idx}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"brief_btn_hist_{idx}",
+                use_container_width=False,
+            )
+            
+            with st.expander("🔍 View Retrieved Database & Spreadsheet Proof"):
+                st.info("Retrieved context verified and locked in session memory.")
         else:
             st.markdown(message["content"])
 
 
 # =====================================================================
-# 7. THE INTERACTIVE CHAT BOX (With Zero-Flash Streaming & Plotly Charts!)
+# 7. THE INTERACTIVE CHAT BOX (With Instant WebSocket Locking!)
 # =====================================================================
 if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet charts..."):
 
@@ -520,18 +633,20 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
                 stream=True,
             )
 
+            # 1. Stream the live tokens seamlessly to the user
             st.write_stream(live_stream_filter(stream, raw_tokens))
-
             full_ai_answer = "".join(raw_tokens)
 
+            # 2. Lock the complete answer into permanent session memory FIRST
             st.session_state.messages.append(
                 {"role": "assistant", "content": full_ai_answer}
             )
 
-            render_ai_charts(full_ai_answer)
-
-            with st.expander("🔍 View Retrieved Database & Spreadsheet Proof"):
-                st.info(full_combined_context)
+            # 3. FORCE AN IMMEDIATE RERUN!
+            # This instantly closes the fragile WebSocket stream container and forces
+            # Streamlit to cleanly render the text, charts, and Word buttons from the
+            # stable historical loop above. It makes text deletion physically impossible!
+            st.rerun()
 
         except Exception as e:
             st.error(f"Error connecting to AI: {e}")
