@@ -1,3 +1,12 @@
+# --- CHROMA DB CLOUD FIX ---
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# ---------------------------
+
+# Your normal imports start here:
+import streamlit as st
+# ...
 import os
 import re
 import io
@@ -15,6 +24,7 @@ from supabase import create_client
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+
 
 # =====================================================================
 # 1. STREAMLIT PAGE SETUP & STYLING
@@ -605,10 +615,12 @@ for idx, message in enumerate(st.session_state.messages):
 # =====================================================================
 if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet charts..."):
 
+    # 1. Show and save user question
     with st.chat_message("user"):
         st.markdown(query)
     st.session_state.messages.append({"role": "user", "content": query})
 
+    # 2. Pull the RAG Context
     results = collection.query(query_texts=[query], n_results=15)
     text_context = (
         "\n---\n".join(results["documents"][0])
@@ -624,6 +636,7 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
 
     full_combined_context = f"--- UNSTRUCTURED TEXT DOCUMENTS ---\n{text_context}\n\n--- STRUCTURED SPREADSHEETS (100% INTACT TABLES) ---\n{spreadsheet_context}"
 
+    # 3. Build the Payload for the AI
     messages_payload = [
         {
             "role": "system",
@@ -648,9 +661,11 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
         }
     ]
 
-    for msg in st.session_state.messages[-6:]:
+    # Add conversation history to the AI's memory
+    for msg in st.session_state.messages[-6:-1]:
         messages_payload.append({"role": msg["role"], "content": msg["content"]})
 
+    # Add the current question + context
     messages_payload.append(
         {
             "role": "user",
@@ -658,6 +673,7 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
         }
     )
 
+    # 4. Generate Answer via Streaming
     with st.chat_message("assistant"):
         try:
             raw_tokens = []
@@ -668,19 +684,17 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
                 stream=True,
             )
 
-            # 1. Stream the live tokens seamlessly to the user
+            # Stream the live tokens seamlessly to the user
             st.write_stream(live_stream_filter(stream, raw_tokens))
             full_ai_answer = "".join(raw_tokens)
 
-            # 2. Lock the complete answer into permanent session memory FIRST
+            # Lock the complete answer into permanent session memory FIRST
             st.session_state.messages.append(
                 {"role": "assistant", "content": full_ai_answer}
             )
 
-            # 3. FORCE AN IMMEDIATE RERUN!
-            # This instantly closes the fragile WebSocket stream container and forces
-            # Streamlit to cleanly render the text, charts, and Word buttons from the
-            # stable historical loop above. It makes text deletion physically impossible!
+            # FORCE AN IMMEDIATE RERUN! 
+            # This triggers Section 6 to safely redraw the text and attach your buttons
             st.rerun()
 
         except Exception as e:
