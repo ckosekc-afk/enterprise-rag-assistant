@@ -24,7 +24,20 @@ from supabase import create_client
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+import streamlit as st
+import chromadb
+from supabase import create_client, Client
 
+# --- 1. WAKE UP SUPABASE ---
+# This pulls your keys from Streamlit secrets so 'supabase' is defined
+supabase_url = st.secrets["SUPABASE_URL"]
+supabase_key = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(supabase_url, supabase_key)
+
+# --- 2. WAKE UP CHROMADB ---
+# This points to your local database folder so 'collection' is defined
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
+collection = chroma_client.get_or_create_collection(name="financial_vault")
 
 # =====================================================================
 # 1. STREAMLIT PAGE SETUP & STYLING
@@ -39,25 +52,39 @@ st.set_page_config(page_title="QuantLex", page_icon="🏢", layout="wide")
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# 3. The Login Wall Checkpoint
-if not st.session_state["authenticated"]:
-    st.title("🏢 QuantLex Client Portal")
-    st.markdown("Please enter your client access key to enter the secure workspace.")
+# Initialize session state for user tracking
+if "user" not in st.session_state:
+    st.session_state["user"] = None
+
+# Block access to the rest of the app if not logged in
+if not st.session_state["user"]:
+    st.title("Enterprise RAG Access")
+    tab1, tab2 = st.tabs(["Login", "Create Account"])
     
-    # Create a simple login form
-    with st.form("login_form", clear_on_submit=False):
-        password_input = st.text_input("Access Key", type="password")
-        submit_button = st.form_submit_button("Enter Workspace", type="primary")
-        
-        if submit_button:
-            # Check against Streamlit Secrets (configured in Step 2)
-            if password_input == st.secrets.get("APP_PASSWORD", "quantlex2026"):
-                st.session_state["authenticated"] = True
-                st.rerun()  # Refresh page to unlock the app
-            else:
-                st.error("Invalid access key. Please contact QuantLex support.")
+    with tab1:
+        log_email = st.text_input("Email", key="log_email")
+        log_pwd = st.text_input("Password", type="password", key="log_pwd")
+        if st.button("Login"):
+            try:
+                # Logs in an existing user
+                res = supabase.auth.sign_in_with_password({"email": log_email, "password": log_pwd})
+                st.session_state["user"] = res.user
+                st.rerun()
+            except Exception as e:
+                st.error(f"Login failed: {e}")
                 
-    # Halt all execution here if not authenticated
+    with tab2:
+        reg_email = st.text_input("Email", key="reg_email")
+        reg_pwd = st.text_input("Password", type="password", key="reg_pwd")
+        if st.button("Sign Up"):
+            try:
+                # Creates a new user in the Supabase backend
+                res = supabase.auth.sign_up({"email": reg_email, "password": reg_pwd})
+                st.success("Account created successfully. Please log in.")
+            except Exception as e:
+                st.error(f"Registration failed: {e}")
+                
+    # st.stop() halts the script here until the user successfully authenticates
     st.stop()
 
 # --- ALL YOUR EXISTING RAG_UI.PY CODE GOES BELOW THIS LINE ---
@@ -94,7 +121,36 @@ elif st.session_state.get("authentication_status") is None:
 current_user = st.session_state.get("username")
 name = st.session_state.get("name")
 
-
+# --- SECURE SIDEBAR UPLOADER ---
+with st.sidebar:
+    st.header("📂 Secure Workspace")
+    st.write(f"Logged in as: {st.session_state['user'].email}")
+    
+    uploaded_file = st.file_uploader("Upload a text document", type=["txt"])
+    
+    if uploaded_file is not None and st.button("Vault Document"):
+        with st.spinner("Encrypting and vaulting..."):
+            # 1. Read the file
+            text_data = uploaded_file.getvalue().decode("utf-8")
+            filename = uploaded_file.name
+            
+            # 2. Break it into readable chunks
+            chunk_size = 1000
+            chunks = [text_data[i:i+chunk_size] for i in range(0, len(text_data), chunk_size)]
+            
+            # 3. Save to Chroma database WITH the secure user_id
+            for i, text_chunk in enumerate(chunks):
+                chunk_id = f"{st.session_state['user'].id}_{filename}_chunk_{i}"
+                
+                # THIS IS THE SNIPPET YOU ASKED ABOUT!
+                collection.add(
+                    documents=[text_chunk],
+                    metadatas=[{"user_id": st.session_state["user"].id, "source": filename}],
+                    ids=[chunk_id]
+                )
+                
+            st.success(f"Successfully vaulted: {filename}")
+# -------------------------------
 # =====================================================================
 # 3. SUPABASE CLOUD VAULT ENGINE
 # =====================================================================
@@ -620,8 +676,13 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
         st.markdown(query)
     st.session_state.messages.append({"role": "user", "content": query})
 
-    # 2. Pull the RAG Context
-    results = collection.query(query_texts=[query], n_results=15)
+    # 2. Pull the RAG Context with User Security Filter
+    results = collection.query(
+        query_texts=[query], 
+        n_results=15,
+        where={"user_id": st.session_state["user"].id}  # <--- Locks access to current user only
+    )
+    
     text_context = (
         "\n---\n".join(results["documents"][0])
         if results["documents"] and results["documents"][0]
@@ -683,6 +744,7 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
                 model="gpt-4o",
                 messages=messages_payload,
                 stream=True,
+                temperature=0.0,
             )
 
             # Stream the live tokens seamlessly to the user
