@@ -86,7 +86,28 @@ if not st.session_state["user"]:
                 
     # st.stop() halts the script here until the user successfully authenticates
     st.stop()
+# ---------------------------------------------------------
+# 5. THE STRIPE PAYWALL
+# ---------------------------------------------------------
+# Extract the custom metadata for the logged-in user
+user_meta = st.session_state["user"].user_metadata or {}
+is_subscribed = user_meta.get("is_subscribed", False)
 
+if not is_subscribed:
+    st.title("🔒 Enterprise Plan Required")
+    st.warning("Your account is currently inactive. Upgrade to unlock the secure RAG vault.")
+    
+    # Render the Stripe checkout button using your secret link
+    st.link_button(
+        "Upgrade to Enterprise ($99/mo)", 
+        st.secrets["STRIPE_PAYMENT_LINK"], 
+        type="primary", 
+        use_container_width=True
+    )
+    
+    # Halt execution so they cannot access the RAG UI below
+    st.stop()
+# ---------------------------------------------------------
 # --- ALL YOUR EXISTING RAG_UI.PY CODE GOES BELOW THIS LINE ---
 # (No need to indent your existing code!)
 st.title("QuantLex")
