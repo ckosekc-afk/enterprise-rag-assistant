@@ -648,7 +648,8 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
                 "1. You must act as an auditable research analyst. Every factual claim, number, policy, or metric you state MUST end with an inline footnote citation.\n"
                 "2. For text documents (PDF/TXT), cite the source filename and section/paragraph where possible, e.g., [Source: Employee_Handbook.pdf].\n"
                 "3. For spreadsheet data, cite the exact table name or row/column context, e.g., [Source: Q3_Revenue.csv, Row 14].\n"
-                "4. Never invent facts or numbers. If the data is missing from the provided context, explicitly state: 'No supporting data found in workspace archives.'\n\n"
+                "4. Never invent facts or numbers. If the data is missing from the provided context, explicitly state: 'No supporting data found in workspace archives.'\n"
+                "5. ZERO HALLUCINATION POLICY: You must extract answers verbatim. Do not paraphrase, creatively summarize, or alter the wording of the provided rules. If quoting a policy, use the exact words from the text.\n\n"
                 "CRITICAL VISUALIZATION INSTRUCTIONS:\n"
                 "If the user explicitly asks for a chart, graph, plot, or visual representation of spreadsheet data, you MUST include a self-contained Python code block wrapped in ```python and ``` at the very end of your response.\n"
                 "Inside that code block:\n"
@@ -699,3 +700,9 @@ if query := st.chat_input("Ask about policies, syllabi, or generate spreadsheet 
 
         except Exception as e:
             st.error(f"Error connecting to AI: {e}")
+            stream = openai_client.chat.completions.create(
+    model="gpt-4o",
+    messages=messages_payload,
+    stream=True,
+    temperature=0.0  # <--- THIS LOCKS DOWN THE CREATIVITY
+)
