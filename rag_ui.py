@@ -89,43 +89,32 @@ if not st.session_state["user"]:
 # ---------------------------------------------------------
 # 5. THE STRIPE PAYWALL
 # ---------------------------------------------------------
-# Extract the custom metadata for the logged-in user
-user_meta = st.session_state["user"].user_metadata or {}
-is_subscribed = user_meta.get("is_subscribed", False)
-
-if not is_subscribed:
-    st.title("🔒 Enterprise Plan Required")
-    st.warning("Your account is currently inactive. Upgrade to unlock the secure RAG vault.")
-    
-    # Render the Stripe checkout button using your secret link
-    st.link_button(
-        "Upgrade to Enterprise ($99/mo)", 
-        st.secrets["STRIPE_PAYMENT_LINK"], 
-        type="primary", 
-        use_container_width=True
-    )
-    
-    # Halt execution so they cannot access the RAG UI below
-    st.stop()
-    # --- 1. GET SUBSCRIPTION STATUS ---
 user_id = st.session_state["user"].id
 
-# Fetch profile from Supabase
+# Check the new profiles table in the database
 profile = supabase.table("profiles").select("is_subscribed").eq("id", user_id).execute()
 
-# If this is their first time logging in, create a profile for them automatically
+# Create a profile if it's their first time
 if len(profile.data) == 0:
     supabase.table("profiles").insert({"id": user_id, "is_subscribed": False}).execute()
     is_subscribed = False
 else:
     is_subscribed = profile.data[0].get("is_subscribed", False)
 
-# --- 2. THE STRIPE PAYWALL ---
 if not is_subscribed:
-    st.error("🔒 Subscription Required")
-    st.write("You need an active Enterprise license to access the secure RAG vault.")
-    st.link_button("🚀 Upgrade to Enterprise", st.secrets["STRIPE_PAYMENT_LINK"])
-    st.stop() # This halts the app and hides your RAG UI!
+    st.title("🔒 Enterprise Plan Required")
+    st.warning("Your account is currently inactive. Upgrade to unlock the secure RAG vault.")
+    
+    # Updated the hardcoded text to reflect your actual price
+    st.link_button(
+        "Upgrade to Enterprise ($499/mo)", 
+        st.secrets["STRIPE_PAYMENT_LINK"], 
+        type="primary", 
+        use_container_width=True
+    )
+    
+    st.stop() # <-- The Paywall Bouncer
+# ---------------------------------------------------------
 # -----------------------------------
 # ---------------------------------------------------------
 # --- ALL YOUR EXISTING RAG_UI.PY CODE GOES BELOW THIS LINE ---
