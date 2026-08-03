@@ -107,6 +107,26 @@ if not is_subscribed:
     
     # Halt execution so they cannot access the RAG UI below
     st.stop()
+    # --- 1. GET SUBSCRIPTION STATUS ---
+user_id = st.session_state["user"].id
+
+# Fetch profile from Supabase
+profile = supabase.table("profiles").select("is_subscribed").eq("id", user_id).execute()
+
+# If this is their first time logging in, create a profile for them automatically
+if len(profile.data) == 0:
+    supabase.table("profiles").insert({"id": user_id, "is_subscribed": False}).execute()
+    is_subscribed = False
+else:
+    is_subscribed = profile.data[0].get("is_subscribed", False)
+
+# --- 2. THE STRIPE PAYWALL ---
+if not is_subscribed:
+    st.error("🔒 Subscription Required")
+    st.write("You need an active Enterprise license to access the secure RAG vault.")
+    st.link_button("🚀 Upgrade to Enterprise", st.secrets["STRIPE_PAYMENT_LINK"])
+    st.stop() # This halts the app and hides your RAG UI!
+# -----------------------------------
 # ---------------------------------------------------------
 # --- ALL YOUR EXISTING RAG_UI.PY CODE GOES BELOW THIS LINE ---
 # (No need to indent your existing code!)
