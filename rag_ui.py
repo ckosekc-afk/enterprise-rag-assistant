@@ -1,7 +1,4 @@
-# --- CHROMA DB CLOUD FIX ---
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 # ---------------------------
 
 # Your normal imports start here:
@@ -96,7 +93,7 @@ profile = supabase.table("profiles").select("is_subscribed").eq("id", user_id).e
 
 # Create a profile if it's their first time
 if len(profile.data) == 0:
-    supabase.table("profiles").insert({"id": user_id, "is_subscribed": False}).execute()
+    
     is_subscribed = False
 else:
     is_subscribed = profile.data[0].get("is_subscribed", False)
@@ -107,11 +104,11 @@ if not is_subscribed:
     
     # Updated the hardcoded text to reflect your actual price
     st.link_button(
-        "Upgrade to Enterprise ($499/mo)", 
-        st.secrets["STRIPE_PAYMENT_LINK"], 
-        type="primary", 
-        use_container_width=True
-    )
+    "Upgrade to Enterprise ($499/mo)", 
+    f"{st.secrets['STRIPE_PAYMENT_LINK']}?client_reference_id={user_id}", 
+    type="primary", 
+    use_container_width=True
+)
     
     st.stop() # <-- The Paywall Bouncer
 # ---------------------------------------------------------
