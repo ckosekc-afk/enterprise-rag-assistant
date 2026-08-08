@@ -89,9 +89,9 @@ if "session_id" in st.query_params:
     try:
         session = stripe.checkout.Session.retrieve(session_id)
         if session.payment_status == "paid":
-            supabase.table("profiles").update({"is_subscribed": True}).eq("id", user_id).execute()
-            st.query_params.clear()
-            st.rerun()
+           supabase.rpc("unlock_user_subscription", {"target_user_id": user_id}).execute()
+        st.query_params.clear()
+        st.rerun()
     except Exception as e:
         st.error("Error verifying payment with Stripe.")
 # ---------------------------
