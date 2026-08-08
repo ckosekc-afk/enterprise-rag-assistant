@@ -27,6 +27,34 @@ supabase_url = st.secrets["SUPABASE_URL"]
 supabase_key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(supabase_url, supabase_key)
 
+import streamlit as st
+import stripe
+# ... your other imports ...
+
+stripe.api_key = st.secrets["STRIPE_API_KEY"]
+
+# --- DEBUG STRIPE VERIFICATION (Must be at the TOP) ---
+if "session_id" in st.query_params:
+    session_id = st.query_params["session_id"]
+    st.warning("⚠️ Intercepted Stripe Redirect! Running Diagnostics...")
+    
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+        st.write("**Payment Status:**", session.payment_status)
+        st.write("**Client Reference ID:**", session.client_reference_id)
+        
+        if session.payment_status == "paid":
+            if session.client_reference_id:
+                response = supabase.rpc("unlock_user_subscription", {"target_user_id": session.client_reference_id}).execute()
+                st.write("**Database Response:**", response)
+                st.success("✅ Database unlock attempted.")
+            else:
+                st.error("🚨 CRITICAL ERROR: Stripe did not send back the user ID!")
+    except Exception as e:
+        st.error(f"Error: {e}")
+    
+    st.stop()
+# ------------------------------------------------------
 # --- 2. WAKE UP CHROMADB ---
 # This points to your local database folder so 'collection' is defined
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
@@ -83,26 +111,7 @@ if not st.session_state["user"]:
 # 5. THE STRIPE PAYWALL
 # ---------------------------------------------------------
 user_id = st.session_state["user"].id
-# --- AUTOMATIC STRIPE VERIFICATION (Place BEFORE login checks) ---
-if "session_id" in st.query_params:
-    session_id = st.query_params["session_id"]
-    try:
-        session = stripe.checkout.Session.retrieve(session_id)
-        if session.payment_status == "paid":
-            # Pull the user ID directly from the Stripe receipt!
-            paid_user_id = session.client_reference_id
-            
-            if paid_user_id:
-                # Unlock the account using our secure SQL function
-                supabase.rpc("unlock_user_subscription", {"target_user_id": paid_user_id}).execute()
-            
-            # Clear the URL and reload
-            st.query_params.clear()
-            st.rerun()
-    except Exception as e:
-        st.error("Error verifying payment with Stripe.")
-# -----------------------------------------------------------------
-# ---------------------------
+
 # Check the new profiles table in the database
 profile = supabase.table("profiles").select("is_subscribed").eq("id", user_id).execute()
 
