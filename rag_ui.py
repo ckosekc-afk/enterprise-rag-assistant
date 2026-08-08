@@ -33,27 +33,23 @@ import stripe
 
 stripe.api_key = st.secrets["STRIPE_API_KEY"]
 
-# --- DEBUG STRIPE VERIFICATION (Must be at the TOP) ---
+# --- AUTOMATIC STRIPE VERIFICATION (FINAL) ---
 if "session_id" in st.query_params:
     session_id = st.query_params["session_id"]
-    st.warning("⚠️ Intercepted Stripe Redirect! Running Diagnostics...")
-    
     try:
         session = stripe.checkout.Session.retrieve(session_id)
-        st.write("**Payment Status:**", session.payment_status)
-        st.write("**Client Reference ID:**", session.client_reference_id)
-        
-        if session.payment_status == "paid":
-            if session.client_reference_id:
-                response = supabase.rpc("unlock_user_subscription", {"target_user_id": session.client_reference_id}).execute()
-                st.write("**Database Response:**", response)
-                st.success("✅ Database unlock attempted.")
-            else:
-                st.error("🚨 CRITICAL ERROR: Stripe did not send back the user ID!")
+        if session.payment_status == "paid" and session.client_reference_id:
+            # 1. Unlock the account in the background
+            supabase.rpc("unlock_user_subscription", {"target_user_id": session.client_reference_id}).execute()
+            
+            # 2. Erase the receipt from the URL so it doesn't run twice
+            st.query_params.clear()
+            
+            # 3. Reload the page seamlessly!
+            st.rerun()
     except Exception as e:
-        st.error(f"Error: {e}")
-    
-    st.stop()
+        pass
+# ---------------------------------------------
 # ------------------------------------------------------
 # --- 2. WAKE UP CHROMADB ---
 # This points to your local database folder so 'collection' is defined
