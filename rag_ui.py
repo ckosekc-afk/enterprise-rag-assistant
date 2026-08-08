@@ -1,9 +1,5 @@
-
-# ---------------------------
-
-# Your normal imports start here:
+import stripe
 import streamlit as st
-# ...
 import os
 import re
 import io
@@ -87,13 +83,24 @@ if not st.session_state["user"]:
 # 5. THE STRIPE PAYWALL
 # ---------------------------------------------------------
 user_id = st.session_state["user"].id
-
+# --- STRIPE VERIFICATION ---
+if "session_id" in st.query_params:
+    session_id = st.query_params["session_id"]
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+        if session.payment_status == "paid":
+            supabase.table("profiles").update({"is_subscribed": True}).eq("id", user_id).execute()
+            st.query_params.clear()
+            st.rerun()
+    except Exception as e:
+        st.error("Error verifying payment with Stripe.")
+# ---------------------------
 # Check the new profiles table in the database
 profile = supabase.table("profiles").select("is_subscribed").eq("id", user_id).execute()
 
 # Create a profile if it's their first time
 if len(profile.data) == 0:
-    
+
     is_subscribed = False
 else:
     is_subscribed = profile.data[0].get("is_subscribed", False)
@@ -259,7 +266,7 @@ def load_rag_engine(user_id):
         name=f"collection_{user_id}"
     )
     openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
+    stripe.api_key = st.secrets["STRIPE_API_KEY"]
     def chunk_text(text, chunk_size=150):
         words = text.split()
         return [
