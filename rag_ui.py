@@ -1,88 +1,66 @@
-import stripe
-import streamlit as st
 import os
 import re
 import io
 import datetime
-import chromadb
-from openai import OpenAI
-import streamlit as st
-import streamlit_authenticator as stauth
 import yaml
-from yaml.loader import SafeLoader
-from pypdf import PdfReader
 import pandas as pd
 import plotly.express as px
-from supabase import create_client
+from openai import OpenAI
+from pypdf import PdfReader
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import streamlit as st
+import stripe
 import chromadb
 from supabase import create_client, Client
+import streamlit_authenticator as stauth
+from yaml.loader import SafeLoader
 
-# --- 1. WAKE UP SUPABASE ---
-# This pulls your keys from Streamlit secrets so 'supabase' is defined
+# --- 1. STREAMLIT PAGE SETUP (MUST BE FIRST) ---
+st.set_page_config(page_title="QuantLex", page_icon="📊", layout="wide")
+
+# --- 2. WAKE UP API KEYS ---
 supabase_url = st.secrets["SUPABASE_URL"]
 supabase_key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(supabase_url, supabase_key)
-
-import streamlit as st
-import stripe
-# ... your other imports ...
-
 stripe.api_key = st.secrets["STRIPE_API_KEY"]
 
-# --- STRIPE REDIRECT VERIFICATION (TAB FREEZER) ---
-if "session_id" in st.query_params:
-    # Instantly freeze the page so it NEVER loads the login screen
-    st.success("🎉 Payment successful! Your account is unlocked.")
-    st.info("⚠️ YOU ARE IN A NEW TAB. Please close this tab, go back to your original app tab, and click the 'Refresh' button.")
-    
-    try:
-        session_id = st.query_params["session_id"]
-        session = stripe.checkout.Session.retrieve(session_id)
-        if session.payment_status == "paid" and session.client_reference_id:
-            # Unlock user in Supabase
-            supabase.rpc("unlock_user_subscription", {"target_user_id": session.client_reference_id}).execute()
-    except Exception:
-        pass
-        
-    st.stop() # This physically prevents the login screen from ever appearing
-# ------------------------------------------------------
-# --- 2. WAKE UP CHROMADB ---
-# This points to your local database folder so 'collection' is defined
-# --- SAFE DATABASE INITIALIZATION ---
+# --- 3. PREVENT DATABASE CRASHES ---
 @st.cache_resource
 def get_chroma_client():
     import chromadb.api
-    # Clear out any corrupted system memory before starting
     chromadb.api.client.SharedSystemClient.clear_system_cache()
     return chromadb.PersistentClient(path="./chroma_db")
 
 chroma_client = get_chroma_client()
-# ------------------------------------
 collection = chroma_client.get_or_create_collection(name="financial_vault")
 
-# =====================================================================
-# 1. STREAMLIT PAGE SETUP & STYLING
-# =====================================================================
-st.set_page_config(page_title="QuantLex", page_icon="📊", layout="wide")
-import streamlit as st
+# --- 4. THE STRIPE AUTO-UNLOCKER ---
+if "session_id" in st.query_params:
+    session_id = st.query_params["session_id"]
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+        if session.payment_status == "paid" and session.client_reference_id:
+            user_id = session.client_reference_id
+            
+            # Unlock database
+            supabase.rpc("unlock_user_subscription", {"target_user_id": user_id}).execute()
+            
+            # VIP Auto-Login (forces them past the login screen on the new tab)
+            class PaidUser:
+                def __init__(self, uid):
+                    self.id = uid
+            st.session_state["user"] = PaidUser(user_id)
+            
+            # Clear URL so it doesn't run twice
+            st.query_params.clear()
+            st.rerun()
+    except Exception:
+        pass
 
-# 1. Page Config (Keep your existing config here)
-st.set_page_config(page_title="QuantLex", page_icon="🏢", layout="wide")
-
-# 2. Initialize authentication memory
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
-# Initialize session state for user tracking
+# --- 5. THE SINGLE LOGIN SCREEN ---
 if "user" not in st.session_state:
-    st.session_state["user"] = None
-
-# Block access to the rest of the app if not logged in
-if not st.session_state["user"]:
     st.title("Enterprise RAG Access")
     tab1, tab2 = st.tabs(["Login", "Create Account"])
     
@@ -91,35 +69,28 @@ if not st.session_state["user"]:
         log_pwd = st.text_input("Password", type="password", key="log_pwd")
         if st.button("Login"):
             try:
-                # Logs in an existing user
                 res = supabase.auth.sign_in_with_password({"email": log_email, "password": log_pwd})
                 st.session_state["user"] = res.user
                 st.rerun()
             except Exception as e:
-                st.error(f"Login failed: {e}")
+                st.error("Login failed: Invalid email or password.")
                 
     with tab2:
         reg_email = st.text_input("Email", key="reg_email")
         reg_pwd = st.text_input("Password", type="password", key="reg_pwd")
         if st.button("Sign Up"):
             try:
-                # Creates a new user in the Supabase backend
                 res = supabase.auth.sign_up({"email": reg_email, "password": reg_pwd})
                 st.success("Account created successfully. Please log in.")
             except Exception as e:
                 st.error(f"Registration failed: {e}")
                 
-    # st.stop() halts the script here until the user successfully authenticates
-    st.stop()
-# ---------------------------------------------------------
-# 5. THE STRIPE PAYWALL
-# ---------------------------------------------------------
-user_id = st.session_state["user"].id
+    st.stop() # Stops the app here if they aren't logged in
 
-# Check the new profiles table in the database
+# --- 6. THE STRIPE PAYWALL ---
+user_id = st.session_state["user"].id
 profile = supabase.table("profiles").select("is_subscribed").eq("id", user_id).execute()
 
-# Create a profile if it's their first time
 if len(profile.data) == 0:
     is_subscribed = False
 else:
@@ -136,12 +107,14 @@ if not is_subscribed:
         use_container_width=True
     )
     
-    # --- THIS IS THE ONLY NEW PART ---
-    if st.button("I just paid - Refresh my account", type="secondary", use_container_width=True):
+    # Backup refresh button just in case they go back to the old tab
+    if st.button("I just paid - Refresh my account", type="secondary"):
         st.rerun()
-    # ---------------------------------
         
-    st.stop() # <-- The Paywall Bouncer
+    st.stop() # Stops them from seeing the AI Chat until paid
+
+
+# =================================================================
 # ---------------------------------------------------------
 # --- ALL YOUR EXISTING RAG_UI.PY CODE GOES BELOW THIS LINE ---
 # (No need to indent your existing code!)
