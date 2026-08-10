@@ -33,27 +33,22 @@ import stripe
 
 stripe.api_key = st.secrets["STRIPE_API_KEY"]
 
-# --- STRIPE REDIRECT VERIFICATION ---
+# --- STRIPE REDIRECT VERIFICATION (TAB FREEZER) ---
 if "session_id" in st.query_params:
-    session_id = st.query_params["session_id"]
+    # Instantly freeze the page so it NEVER loads the login screen
+    st.success("🎉 Payment successful! Your account is unlocked.")
+    st.info("⚠️ YOU ARE IN A NEW TAB. Please close this tab, go back to your original app tab, and click the 'Refresh' button.")
+    
     try:
+        session_id = st.query_params["session_id"]
         session = stripe.checkout.Session.retrieve(session_id)
         if session.payment_status == "paid" and session.client_reference_id:
-            # 1. Unlock user in Supabase
+            # Unlock user in Supabase
             supabase.rpc("unlock_user_subscription", {"target_user_id": session.client_reference_id}).execute()
-            
-            # 2. VIP AUTO-LOGIN (Bypass the login screen completely)
-            class PaidUser:
-                def __init__(self, uid):
-                    self.id = uid
-            st.session_state["user"] = PaidUser(session.client_reference_id)
-            
-            # 3. Clear URL and drop directly into the vault
-            st.query_params.clear()
-            st.rerun()
-    except Exception as e:
-        st.error("Verification failed. Please contact support.")
-# ------------------------------------
+    except Exception:
+        pass
+        
+    st.stop() # This physically prevents the login screen from ever appearing
 # ------------------------------------------------------
 # --- 2. WAKE UP CHROMADB ---
 # This points to your local database folder so 'collection' is defined
@@ -126,7 +121,6 @@ profile = supabase.table("profiles").select("is_subscribed").eq("id", user_id).e
 
 # Create a profile if it's their first time
 if len(profile.data) == 0:
-
     is_subscribed = False
 else:
     is_subscribed = profile.data[0].get("is_subscribed", False)
@@ -135,17 +129,19 @@ if not is_subscribed:
     st.title("🔒 Enterprise Plan Required")
     st.warning("Your account is currently inactive. Upgrade to unlock the secure RAG vault.")
     
-    # Updated the hardcoded text to reflect your actual price
     st.link_button(
-    "Upgrade to Enterprise ($499/mo)", 
-    f"{st.secrets['STRIPE_PAYMENT_LINK']}?client_reference_id={user_id}", 
-    type="primary", 
-    use_container_width=True
-)
+        "Upgrade to Enterprise ($499/mo)", 
+        f"{st.secrets['STRIPE_PAYMENT_LINK']}?client_reference_id={user_id}", 
+        type="primary", 
+        use_container_width=True
+    )
     
+    # --- THIS IS THE ONLY NEW PART ---
+    if st.button("I just paid - Refresh my account", type="secondary", use_container_width=True):
+        st.rerun()
+    # ---------------------------------
+        
     st.stop() # <-- The Paywall Bouncer
-# ---------------------------------------------------------
-# -----------------------------------
 # ---------------------------------------------------------
 # --- ALL YOUR EXISTING RAG_UI.PY CODE GOES BELOW THIS LINE ---
 # (No need to indent your existing code!)
