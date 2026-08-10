@@ -33,23 +33,20 @@ import stripe
 
 stripe.api_key = st.secrets["STRIPE_API_KEY"]
 
-# --- AUTOMATIC STRIPE VERIFICATION (FINAL) ---
+# --- STRIPE REDIRECT VERIFICATION ---
 if "session_id" in st.query_params:
     session_id = st.query_params["session_id"]
     try:
         session = stripe.checkout.Session.retrieve(session_id)
         if session.payment_status == "paid" and session.client_reference_id:
-            # 1. Unlock the account in the background
+            # 1. Unlock user in Supabase
             supabase.rpc("unlock_user_subscription", {"target_user_id": session.client_reference_id}).execute()
-            
-            # 2. Erase the receipt from the URL so it doesn't run twice
+            # 2. Clear session_id from URL
             st.query_params.clear()
-            
-            # 3. Reload the page seamlessly!
-            st.rerun()
+            st.success("🎉 Payment successful! Please log in to access your unlocked AI vault.")
     except Exception as e:
-        pass
-# ---------------------------------------------
+        st.error("Verification failed. Please refresh or contact support.")
+# ------------------------------------
 # ------------------------------------------------------
 # --- 2. WAKE UP CHROMADB ---
 # This points to your local database folder so 'collection' is defined
