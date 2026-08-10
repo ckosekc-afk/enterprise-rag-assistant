@@ -50,7 +50,16 @@ if "session_id" in st.query_params:
 # ------------------------------------------------------
 # --- 2. WAKE UP CHROMADB ---
 # This points to your local database folder so 'collection' is defined
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
+# --- SAFE DATABASE INITIALIZATION ---
+@st.cache_resource
+def get_chroma_client():
+    import chromadb.api
+    # Clear out any corrupted system memory before starting
+    chromadb.api.client.SharedSystemClient.clear_system_cache()
+    return chromadb.PersistentClient(path="./chroma_db")
+
+chroma_client = get_chroma_client()
+# ------------------------------------
 collection = chroma_client.get_or_create_collection(name="financial_vault")
 
 # =====================================================================
