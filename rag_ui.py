@@ -41,11 +41,18 @@ if "session_id" in st.query_params:
         if session.payment_status == "paid" and session.client_reference_id:
             # 1. Unlock user in Supabase
             supabase.rpc("unlock_user_subscription", {"target_user_id": session.client_reference_id}).execute()
-            # 2. Clear session_id from URL
+            
+            # 2. VIP AUTO-LOGIN (Bypass the login screen completely)
+            class PaidUser:
+                def __init__(self, uid):
+                    self.id = uid
+            st.session_state["user"] = PaidUser(session.client_reference_id)
+            
+            # 3. Clear URL and drop directly into the vault
             st.query_params.clear()
-            st.success("🎉 Payment successful! Please log in to access your unlocked AI vault.")
+            st.rerun()
     except Exception as e:
-        st.error("Verification failed. Please refresh or contact support.")
+        st.error("Verification failed. Please contact support.")
 # ------------------------------------
 # ------------------------------------------------------
 # --- 2. WAKE UP CHROMADB ---
